@@ -1,3 +1,6 @@
+use std::f32::consts::PI;
+
+use bevy::asset::AssetServer;
 use bevy::camera::Camera3d;
 use bevy::ecs::component::Component;
 use bevy::ecs::entity::Entity;
@@ -9,6 +12,7 @@ use bevy::input::ButtonInput;
 use bevy::input::keyboard::KeyCode;
 use bevy::input::mouse::{MouseButton, MouseMotion};
 use bevy::math::{Quat, Vec2, Vec3};
+use bevy::scene::SceneRoot;
 use bevy::time::Time;
 use bevy::transform::components::Transform;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
@@ -22,6 +26,7 @@ const PLAYER_HEIGHT: f32 = 1.7;
 const PITCH_LIMIT: f32 = 1.4;
 const INTERACT_RANGE: f32 = 2.5;
 const PLAYER_HALF_EXTENTS: Vec3 = Vec3::new(0.2, 0.85, 0.2);
+const FPS_WEAPON_SCENE: &str = "kenney_blaster-kit_2.1/Models/GLB format/blaster-a.glb#Scene0";
 
 #[derive(Component)]
 pub struct Player;
@@ -64,15 +69,27 @@ pub fn is_in_vehicle(state: Res<PlayerState>) -> bool {
     state.mode == PlayerMode::InVehicle
 }
 
-pub fn system_spawn_player(mut commands: Commands) {
+pub fn system_spawn_player(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let weapon_scene = SceneRoot(asset_server.load(FPS_WEAPON_SCENE));
+
     commands
-        .spawn((Player, Transform::from_xyz(6.0, 0.0, 6.0)))
+        .spawn((Player, Transform::from_xyz(8.0, 0.0, 8.0)))
         .with_children(|parent| {
-            parent.spawn((
-                PlayerCamera,
-                Camera3d::default(),
-                Transform::from_xyz(0.0, PLAYER_HEIGHT, 0.0),
-            ));
+            parent
+                .spawn((
+                    PlayerCamera,
+                    Camera3d::default(),
+                    Transform::from_xyz(0.0, PLAYER_HEIGHT, 0.0),
+                ))
+                .with_children(|camera| {
+                    // First-person weapon viewmodel.
+                    camera.spawn((
+                        weapon_scene.clone(),
+                        Transform::from_xyz(0.18, -0.18, -0.45)
+                            .with_rotation(Quat::from_rotation_y(PI))
+                            .with_scale(Vec3::splat(0.35)),
+                    ));
+                });
         });
 }
 
