@@ -1,43 +1,78 @@
 use std::f32::consts::{FRAC_PI_2, PI};
+use std::fs;
 
+use bevy::app::{Plugin, Startup};
 use bevy::asset::AssetServer;
 use bevy::color::Color;
+use bevy::ecs::resource::Resource;
+use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::system::{Commands, Res};
 use bevy::light::{DirectionalLight, GlobalAmbientLight};
 use bevy::math::{Quat, Vec3};
 use bevy::scene::SceneRoot;
 use bevy::transform::components::Transform;
+use serde::Deserialize;
 
 use crate::collision::Collider;
 use crate::vehicle::{Vehicle, VehicleState};
 
 const ASSET_BASE: &str = "kenney_retro-urban-kit/Models/GLB format/";
+const TOWN_CONFIG_PATH: &str = "assets/config/town.json";
 
-// Grid cell types:
-// 0 = grass
-// 1 = road N-S
-// 2 = road E-W
-// 3 = road intersection
-// 4 = building zone (grass tile underneath, building assembled on 2x2 blocks)
-// 5 = parking (pavement + vehicle spawn)
-// 6 = park (grass + trees)
-const GRID: [[u8; 8]; 8] = [
-    [4, 4, 0, 1, 0, 0, 6, 6],
-    [4, 4, 0, 1, 0, 0, 6, 6],
-    [0, 0, 0, 1, 0, 0, 0, 0],
-    [2, 2, 2, 3, 2, 2, 2, 2],
-    [0, 0, 0, 1, 0, 0, 0, 0],
-    [4, 4, 0, 1, 0, 4, 4, 0],
-    [4, 4, 0, 1, 5, 4, 4, 0],
-    [0, 0, 0, 1, 0, 0, 0, 0],
-];
+pub struct TownPlugin;
+
+impl Plugin for TownPlugin {
+    fn build(&self, app: &mut bevy::app::App) {
+        app.add_systems(
+            Startup,
+            (system_load_town_config, system_spawn_town_from_config).chain(),
+        );
+    }
+}
+
+#[derive(Resource, Deserialize, Clone)]
+pub struct TownConfig {
+    pub grid: Vec<Vec<CellType>>,
+    pub props: Vec<PropSpawn>,
+}
+
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum CellType {
+    Grass,
+    RoadNs,
+    RoadEw,
+    RoadIntersection,
+    BuildingZone,
+    Parking,
+    Park,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct PropSpawn {
+    pub model: String,
+    pub position: [f32; 3],
+    pub yaw: f32,
+}
 
 fn load_scene(asset_server: &AssetServer, name: &str) -> SceneRoot {
     let path = format!("{ASSET_BASE}{name}#Scene0");
     SceneRoot(asset_server.load(path))
 }
 
-pub fn system_spawn_town(mut commands: Commands, asset_server: Res<AssetServer>) {
+pub fn system_load_town_config(mut commands: Commands) {
+    let data = fs::read_to_string(TOWN_CONFIG_PATH)
+        .unwrap_or_else(|error| panic!("Failed to read {TOWN_CONFIG_PATH}: {error}"));
+    let config: TownConfig = serde_json::from_str(&data)
+        .unwrap_or_else(|error| panic!("Failed to parse {TOWN_CONFIG_PATH} as JSON: {error}"));
+
+    commands.insert_resource(config);
+}
+
+pub fn system_spawn_town_from_config(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    config: Res<TownConfig>,
+) {
     commands.spawn((
         DirectionalLight {
             illuminance: 12_000.0,
@@ -52,19 +87,26 @@ pub fn system_spawn_town(mut commands: Commands, asset_server: Res<AssetServer>)
         affects_lightmapped_meshes: true,
     });
 
-    let mut building_spawned = [[false; 8]; 8];
+    let rows = config.grid.len();
+    let max_cols = config
+        .grid
+        .iter()
+        .map(std::vec::Vec::len)
+        .max()
+        .unwrap_or(0);
+    let mut building_spawned = vec![vec![false; max_cols]; rows];
 
-    for row in 0..8_usize {
-        for col in 0..8_usize {
-            let cell = GRID[row][col];
+    for row in 0..rows {
+        for col in 0..config.grid[row].len() {
+            let cell = config.grid[row][col];
             let x = col as f32;
             let z = row as f32;
 
             match cell {
-                0 => {
+                CellType::Grass => {
                     spawn_tile(&mut commands, &asset_server, "grass.glb", x, z, 0.0);
                 }
-                1 => {
+                CellType::RoadNs => {
                     spawn_tile(
                         &mut commands,
                         &asset_server,
@@ -74,7 +116,7 @@ pub fn system_spawn_town(mut commands: Commands, asset_server: Res<AssetServer>)
                         0.0,
                     );
                 }
-                2 => {
+                CellType::RoadEw => {
                     spawn_tile(
                         &mut commands,
                         &asset_server,
@@ -84,7 +126,7 @@ pub fn system_spawn_town(mut commands: Commands, asset_server: Res<AssetServer>)
                         FRAC_PI_2,
                     );
                 }
-                3 => {
+                CellType::RoadIntersection => {
                     spawn_tile(
                         &mut commands,
                         &asset_server,
@@ -94,15 +136,16 @@ pub fn system_spawn_town(mut commands: Commands, asset_server: Res<AssetServer>)
                         0.0,
                     );
                 }
-                4 => {
+                CellType::BuildingZone => {
                     spawn_tile(&mut commands, &asset_server, "grass.glb", x, z, 0.0);
 
                     if !building_spawned[row][col]
-                        && col + 1 < 8
-                        && row + 1 < 8
-                        && GRID[row][col + 1] == 4
-                        && GRID[row + 1][col] == 4
-                        && GRID[row + 1][col + 1] == 4
+                        && col + 1 < config.grid[row].len()
+                        && row + 1 < rows
+                        && col + 1 < config.grid[row + 1].len()
+                        && config.grid[row][col + 1] == CellType::BuildingZone
+                        && config.grid[row + 1][col] == CellType::BuildingZone
+                        && config.grid[row + 1][col + 1] == CellType::BuildingZone
                     {
                         building_spawned[row][col] = true;
                         building_spawned[row][col + 1] = true;
@@ -113,7 +156,7 @@ pub fn system_spawn_town(mut commands: Commands, asset_server: Res<AssetServer>)
                         spawn_building(&mut commands, &asset_server, x, z, variant);
                     }
                 }
-                5 => {
+                CellType::Parking => {
                     spawn_tile(
                         &mut commands,
                         &asset_server,
@@ -123,11 +166,9 @@ pub fn system_spawn_town(mut commands: Commands, asset_server: Res<AssetServer>)
                         0.0,
                     );
                     spawn_vehicle(&mut commands, &asset_server, x, z, 0.0);
-                    spawn_vehicle(&mut commands, &asset_server, x, z + 0.4, PI);
                 }
-                6 => {
+                CellType::Park => {
                     spawn_tile(&mut commands, &asset_server, "grass.glb", x, z, 0.0);
-                    // Scatter trees in park cells
                     let tree_model = match (row + col) % 3 {
                         0 => "tree-large.glb",
                         1 => "tree-park-large.glb",
@@ -138,12 +179,17 @@ pub fn system_spawn_town(mut commands: Commands, asset_server: Res<AssetServer>)
                         Transform::from_xyz(x, 0.0, z),
                     ));
                 }
-                _ => {}
             }
         }
     }
 
-    spawn_props(&mut commands, &asset_server);
+    for prop in &config.props {
+        commands.spawn((
+            load_scene(&asset_server, &prop.model),
+            Transform::from_xyz(prop.position[0], prop.position[1], prop.position[2])
+                .with_rotation(Quat::from_rotation_y(prop.yaw)),
+        ));
+    }
 }
 
 fn spawn_tile(
@@ -184,8 +230,6 @@ fn spawn_building(
         )
     };
 
-    // Wall positions: (x, z, rotation, model_index)
-    // 0 = plain wall, 1 = door, 2 = window
     let walls: [(f32, f32, f32, u8); 8] = [
         (col + 0.5, row, 0.0, 0),
         (col + 1.5, row, 0.0, 2),
@@ -235,30 +279,5 @@ fn spawn_vehicle(commands: &mut Commands, asset_server: &AssetServer, x: f32, z:
             speed: 0.0,
             yaw: angle,
         },
-    ));
-}
-
-fn spawn_props(commands: &mut Commands, asset_server: &AssetServer) {
-    for row in [0.0_f32, 2.0, 4.5, 7.0] {
-        commands.spawn((
-            load_scene(asset_server, "detail-light-single.glb"),
-            Transform::from_xyz(3.6, 0.0, row),
-        ));
-    }
-
-    for col in [0.5_f32, 2.0, 5.0, 7.0] {
-        commands.spawn((
-            load_scene(asset_server, "detail-light-single.glb"),
-            Transform::from_xyz(col, 0.0, 3.6),
-        ));
-    }
-
-    commands.spawn((
-        load_scene(asset_server, "detail-bench.glb"),
-        Transform::from_xyz(5.5, 0.0, 1.0).with_rotation(Quat::from_rotation_y(FRAC_PI_2)),
-    ));
-    commands.spawn((
-        load_scene(asset_server, "detail-bench.glb"),
-        Transform::from_xyz(5.5, 0.0, 2.0).with_rotation(Quat::from_rotation_y(FRAC_PI_2)),
     ));
 }

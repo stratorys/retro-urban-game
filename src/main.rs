@@ -1,22 +1,21 @@
 mod collision;
-mod error;
 mod player;
 mod town;
 mod vehicle;
 
 use bevy::DefaultPlugins;
+use bevy::app::PluginGroup;
 use bevy::app::{App, Startup, Update};
 use bevy::ecs::schedule::IntoScheduleConfigs;
+use bevy::image::ImagePlugin;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
+        .add_plugins(town::TownPlugin)
         .insert_resource(player::PlayerState::default())
         .insert_resource(player::LookAngles::default())
-        .add_systems(
-            Startup,
-            (town::system_spawn_town, player::system_spawn_player),
-        )
+        .add_systems(Startup, player::system_spawn_player)
         .add_systems(
             Update,
             (

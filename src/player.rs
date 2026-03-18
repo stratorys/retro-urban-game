@@ -66,7 +66,7 @@ pub fn is_in_vehicle(state: Res<PlayerState>) -> bool {
 
 pub fn system_spawn_player(mut commands: Commands) {
     commands
-        .spawn((Player, Transform::from_xyz(4.0, 0.0, 4.0)))
+        .spawn((Player, Transform::from_xyz(6.0, 0.0, 6.0)))
         .with_children(|parent| {
             parent.spawn((
                 PlayerCamera,
