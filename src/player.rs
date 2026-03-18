@@ -7,14 +7,14 @@ use bevy::ecs::entity::Entity;
 use bevy::ecs::message::MessageReader;
 use bevy::ecs::query::{With, Without};
 use bevy::ecs::resource::Resource;
-use bevy::ecs::system::{Commands, Query, Res, ResMut};
+use bevy::ecs::system::{Commands, Local, Query, Res, ResMut};
 use bevy::input::ButtonInput;
 use bevy::input::keyboard::KeyCode;
 use bevy::input::mouse::{MouseButton, MouseMotion};
 use bevy::math::{Quat, Vec2, Vec3};
 use bevy::scene::SceneRoot;
 use bevy::time::Time;
-use bevy::transform::components::Transform;
+use bevy::transform::components::{GlobalTransform, Transform};
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 use crate::collision::{Collider, resolve_movement};
@@ -27,12 +27,22 @@ const PITCH_LIMIT: f32 = 1.4;
 const INTERACT_RANGE: f32 = 2.5;
 const PLAYER_HALF_EXTENTS: Vec3 = Vec3::new(0.2, 0.85, 0.2);
 const FPS_WEAPON_SCENE: &str = "kenney_blaster-kit_2.1/Models/GLB format/blaster-a.glb#Scene0";
+const PROJECTILE_SCENE: &str = "kenney_blaster-kit_2.1/Models/GLB format/bullet-foam.glb#Scene0";
+const PROJECTILE_SPEED: f32 = 26.0;
+const PROJECTILE_LIFETIME: f32 = 1.0;
+const SHOOT_COOLDOWN: f32 = 0.12;
 
 #[derive(Component)]
 pub struct Player;
 
 #[derive(Component)]
 pub struct PlayerCamera;
+
+#[derive(Component)]
+pub struct Projectile {
+    pub velocity: Vec3,
+    pub ttl: f32,
+}
 
 #[derive(Resource)]
 pub struct PlayerState {
@@ -91,6 +101,60 @@ pub fn system_spawn_player(mut commands: Commands, asset_server: Res<AssetServer
                     ));
                 });
         });
+}
+
+pub fn system_player_shoot(
+    mut commands: Commands,
+    time: Res<Time>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    state: Res<PlayerState>,
+    asset_server: Res<AssetServer>,
+    camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
+    mut cooldown: Local<f32>,
+) {
+    if state.mode != PlayerMode::OnFoot {
+        return;
+    }
+
+    *cooldown = (*cooldown - time.delta_secs()).max(0.0);
+    if !mouse.pressed(MouseButton::Left) || *cooldown > 0.0 {
+        return;
+    }
+    *cooldown = SHOOT_COOLDOWN;
+
+    let Ok(camera_transform) = camera_query.single() else {
+        return;
+    };
+
+    let camera = camera_transform.compute_transform();
+    let forward = camera.rotation * -Vec3::Z;
+    let spawn_position = camera.translation + forward * 0.7 + Vec3::Y * -0.08;
+
+    commands.spawn((
+        SceneRoot(asset_server.load(PROJECTILE_SCENE)),
+        Transform::from_translation(spawn_position).with_scale(Vec3::splat(0.25)),
+        Projectile {
+            velocity: forward * PROJECTILE_SPEED,
+            ttl: PROJECTILE_LIFETIME,
+        },
+    ));
+}
+
+pub fn system_projectile_move(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut projectile_query: Query<(Entity, &mut Transform, &mut Projectile)>,
+) {
+    let dt = time.delta_secs();
+
+    for (entity, mut transform, mut projectile) in &mut projectile_query {
+        transform.translation += projectile.velocity * dt;
+        projectile.ttl -= dt;
+
+        if projectile.ttl <= 0.0 {
+            commands.entity(entity).despawn();
+        }
+    }
 }
 
 pub fn system_cursor_grab(

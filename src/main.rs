@@ -37,5 +37,12 @@ fn main() {
                 .run_if(player::is_in_vehicle)
                 .after(player::system_player_interact),
         )
+        .add_systems(
+            Update,
+            player::system_player_shoot
+                .run_if(player::is_on_foot)
+                .after(player::system_mouse_look),
+        )
+        .add_systems(Update, player::system_projectile_move)
         .run();
 }
