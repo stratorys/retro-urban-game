@@ -1,44 +1,42 @@
-use bevy::DefaultPlugins;
-use bevy::app::{App, Startup};
-use bevy::camera::Camera2d;
-use bevy::color::Color;
-use bevy::color::Srgba;
-use bevy::ecs::component::Component;
-use bevy::ecs::system::Commands;
-use bevy::math::Vec3;
-use bevy::sprite::Text2d;
-use bevy::text::{TextColor, TextFont};
-use bevy::transform::components::Transform;
-use bevy::utils::default;
+mod collision;
+mod error;
+mod player;
+mod town;
+mod vehicle;
 
-#[derive(Component)]
-struct Player;
+use bevy::DefaultPlugins;
+use bevy::app::{App, Startup, Update};
+use bevy::ecs::schedule::IntoScheduleConfigs;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_systems(Startup, setup)
+        .insert_resource(player::PlayerState::default())
+        .insert_resource(player::LookAngles::default())
+        .add_systems(
+            Startup,
+            (town::system_spawn_town, player::system_spawn_player),
+        )
+        .add_systems(
+            Update,
+            (
+                player::system_cursor_grab,
+                player::system_mouse_look,
+                player::system_player_interact,
+            )
+                .chain(),
+        )
+        .add_systems(
+            Update,
+            player::system_player_move
+                .run_if(player::is_on_foot)
+                .after(player::system_player_interact),
+        )
+        .add_systems(
+            Update,
+            vehicle::system_vehicle_drive
+                .run_if(player::is_in_vehicle)
+                .after(player::system_player_interact),
+        )
         .run();
-}
-
-fn setup(mut commands: Commands) {
-    commands.spawn(Camera2d);
-
-    commands.spawn((
-        Text2d::new("@"),
-        TextFont {
-            font_size: 12.0,
-            font: default(),
-            ..default()
-        },
-        // TextColor(Color::WHITE),
-        TextColor(Color::Srgba(Srgba {
-            red: 1.0,
-            green: 0.0,
-            blue: 0.0,
-            alpha: 1.0,
-        })),
-        Transform::from_translation(Vec3::ZERO),
-        Player,
-    ));
 }
