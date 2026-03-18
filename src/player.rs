@@ -83,7 +83,7 @@ pub fn system_spawn_player(mut commands: Commands, asset_server: Res<AssetServer
     let weapon_scene = SceneRoot(asset_server.load(FPS_WEAPON_SCENE));
 
     commands
-        .spawn((Player, Transform::from_xyz(8.0, 0.0, 8.0)))
+        .spawn((Player, Transform::from_xyz(10.0, 0.0, 10.0)))
         .with_children(|parent| {
             parent
                 .spawn((
