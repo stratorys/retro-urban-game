@@ -1,0 +1,9 @@
+[package]
+name = "map-editor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { version = "0.18.1", features = ["dynamic_linking"] }
+bevy_egui = "0.39.1"
+map-schema = { path = "../map-schema" }

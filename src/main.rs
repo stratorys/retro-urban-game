@@ -1,50 +1,75 @@
-mod collision;
-mod player;
-mod town;
-mod vehicle;
-mod zombie;
+use std::path::PathBuf;
 
-use bevy::DefaultPlugins;
-use bevy::app::PluginGroup;
-use bevy::app::{App, Startup, Update};
-use bevy::ecs::schedule::IntoScheduleConfigs;
-use bevy::image::ImagePlugin;
+use clap::{Args, Parser, Subcommand};
+
+#[derive(Parser)]
+#[command(name = "retro-urban-game")]
+#[command(about = "Retro Urban game runtime and map editor")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Play(MapPathArgs),
+    Edit(EditArgs),
+}
+
+#[derive(Args)]
+struct MapPathArgs {
+    #[arg(long, value_name = "PATH")]
+    map: PathBuf,
+}
+
+#[derive(Args)]
+struct EditArgs {
+    #[arg(long, value_name = "PATH")]
+    map: PathBuf,
+    #[arg(long)]
+    new: bool,
+    #[arg(long, requires = "new")]
+    width: Option<u32>,
+    #[arg(long, requires = "new")]
+    height: Option<u32>,
+    #[arg(long, requires = "new")]
+    overwrite: bool,
+}
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
-        .add_plugins(town::TownPlugin)
-        .add_plugins(zombie::ZombiePlugin)
-        .insert_resource(player::PlayerState::default())
-        .insert_resource(player::LookAngles::default())
-        .add_systems(Startup, player::system_spawn_player)
-        .add_systems(
-            Update,
-            (
-                player::system_cursor_grab,
-                player::system_mouse_look,
-                player::system_player_interact,
-            )
-                .chain(),
-        )
-        .add_systems(
-            Update,
-            player::system_player_move
-                .run_if(player::is_on_foot)
-                .after(player::system_player_interact),
-        )
-        .add_systems(
-            Update,
-            vehicle::system_vehicle_drive
-                .run_if(player::is_in_vehicle)
-                .after(player::system_player_interact),
-        )
-        .add_systems(
-            Update,
-            player::system_player_shoot
-                .run_if(player::is_on_foot)
-                .after(player::system_mouse_look),
-        )
-        .add_systems(Update, player::system_projectile_move)
-        .run();
+    let cli = Cli::parse();
+
+    let result = match cli.command {
+        Commands::Play(args) => game_app::run(&args.map).map_err(|err| err.to_string()),
+        Commands::Edit(args) => {
+            let new_map = if args.new {
+                let width = args.width.ok_or_else(|| {
+                    "--width is required when --new is provided".to_owned()
+                });
+                let height = args.height.ok_or_else(|| {
+                    "--height is required when --new is provided".to_owned()
+                });
+                Some(match (width, height) {
+                    (Ok(width), Ok(height)) => map_editor::NewMapArgs { width, height },
+                    (Err(error), _) | (_, Err(error)) => {
+                        eprintln!("{error}");
+                        std::process::exit(2);
+                    }
+                })
+            } else {
+                if args.width.is_some() || args.height.is_some() || args.overwrite {
+                    eprintln!("--width/--height/--overwrite require --new");
+                    std::process::exit(2);
+                }
+                None
+            };
+
+            map_editor::run(&args.map, new_map, args.overwrite).map_err(|err| err.to_string())
+        }
+    };
+
+    if let Err(error) = result {
+        eprintln!("{error}");
+        std::process::exit(1);
+    }
 }
